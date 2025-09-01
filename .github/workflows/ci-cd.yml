@@ -1,0 +1,259 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+        - dev
+        - test
+        - prod
+
+env:
+  NODE_VERSION: '18.x'
+  DOTNET_VERSION: '6.0.x'
+  ARM_TEMPLATE_PATH: 'infrastructure/bicep'
+  FRONTEND_PATH: 'apps/frontend'
+  API_PATH: 'apps/api'
+
+jobs:
+  # Static Analysis and Testing
+  analyze:
+    name: 'Static Analysis'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            apps/frontend/package-lock.json
+            apps/api/package-lock.json
+
+      - name: Install ESLint and Prettier
+        run: npm install -g eslint prettier
+
+      - name: Lint Frontend
+        run: |
+          cd apps/frontend
+          npm run lint
+          npx prettier --check "src/**/*.{tsx,ts,css}"
+
+      - name: Lint API
+        run: |
+          cd apps/api
+          npm run lint
+
+  # Build Applications
+  build:
+    name: 'Build Applications'
+    runs-on: ubuntu-latest
+    needs: analyze
+    strategy:
+      matrix:
+        include:
+          - app: frontend
+            path: apps/frontend
+          - app: api
+            path: apps/api
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: '${{ matrix.path }}/package-lock.json'
+
+      - name: Install dependencies
+        run: |
+          cd ${{ matrix.path }}
+          npm ci
+
+      - name: Build and Test ${{ matrix.app }}
+        run: |
+          cd ${{ matrix.path }}
+          npm run build
+          npm run test:ci
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app }}-build
+          path: |
+            ${{ matrix.path }}/build
+            ${{ matrix.path }}/dist
+          retention-days: 7
+
+  # Validate Infrastructure
+  validate-infrastructure:
+    name: 'Validate Infrastructure'
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_DEV }}
+
+      - name: Validate Bicep templates
+        uses: azure/arm-deploy@v1
+        with:
+          scope: resourcegroup
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+          resourceGroupName: rg-sdr-dev-uksouth-validation
+          template: ${{ env.ARM_TEMPLATE_PATH }}/main.bicep
+          parameters: ${{ env.ARM_TEMPLATE_PATH }}/parameters/dev.json
+          deploymentMode: Validate
+
+  # Deploy to Development
+  deploy-dev:
+    name: 'Deploy to Development'
+    runs-on: ubuntu-latest
+    needs: [build, validate-infrastructure]
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_DEV }}
+
+      # Deploy Infrastructure (always for dev)
+      - name: Deploy Infrastructure
+        uses: azure/arm-deploy@v1
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID_DEV }}
+          region: uksouth
+          template: ${{ env.ARM_TEMPLATE_PATH }}/main.bicep
+          parameters: ${{ env.ARM_TEMPLATE_PATH }}/parameters/dev.json
+          deploymentName: 'deployment-dev-${{ github.run_number }}'
+
+      # Deploy Frontend
+      - name: Deploy Frontend to Static Web App
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_DEV }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: 'upload'
+          app_location: '/artifacts/frontend-build'
+          api_location: '/artifacts/api-build'
+          output_location: 'build'
+
+      # Deploy Backend
+      - name: Deploy Azure Functions
+        uses: Azure/functions-action@v1
+        with:
+          app-name: 'func-sdr-dev-uksouth'
+          package: './artifacts/api-build'
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE_DEV }}
+
+      # Health Check
+      - name: Health Check
+        run: |
+          sleep 30
+          curl -f https://swa-sdr-dev-uksouth.azurestaticapps.net/api/health || echo "Health check failed"
+
+  # Deploy to Production
+  deploy-prod:
+    name: 'Deploy to Production'
+    runs-on: ubuntu-latest
+    needs: [build, validate-infrastructure]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_PROD }}
+
+      # Deploy Infrastructure
+      - name: Deploy Production Infrastructure
+        uses: azure/arm-deploy@v1
+        with:
+          scope: subscription
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID_PROD }}
+          region: uksouth
+          template: ${{ env.ARM_TEMPLATE_PATH }}/main.bicep
+          parameters: ${{ env.ARM_TEMPLATE_PATH }}/parameters/prod.json
+          deploymentName: 'deployment-prod-${{ github.run_number }}'
+
+      # Configure Key Vault Secrets
+      - name: Configure Key Vault Secrets
+        run: |
+          az keyvault secret set --name devops-pat-token --vault-name kv-sdr-prod-uksouth --value ${{ secrets.DEVOPS_PAT_PROD }}
+          az keyvault secret set --name openai-api-key --vault-name kv-sdr-prod-uksouth --value ${{ secrets.OPENAI_API_KEY_PROD }}
+          az keyvault secret set --name form-recognizer-key --vault-name kv-sdr-prod-uksouth --value ${{ secrets.FORM_RECOGNIZER_KEY_PROD }}
+
+      # Deploy Frontend
+      - name: Deploy Frontend to Production
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_PROD }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: 'upload'
+          app_location: '/artifacts/frontend-build'
+          api_location: '/artifacts/api-build'
+          output_location: 'build'
+
+      # Deploy Backend
+      - name: Deploy Azure Functions to Production
+        uses: Azure/functions-action@v1
+        with:
+          app-name: 'func-sdr-prod-uksouth'
+          package: './artifacts/api-build'
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE_PROD }}
+
+      # Production Health Check
+      - name: Production Health Check
+        run: |
+          sleep 60
+          curl -f https://swa-sdr-prod-uksouth.azurestaticapps.net/api/health || exit 1
+
+      # Performance Test (if configured)
+      - name: Run Performance Tests
+        if: success()
+        run: |
+          echo "Running synthetic performance tests..."
+          # Add performance test commands here

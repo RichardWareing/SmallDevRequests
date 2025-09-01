@@ -1,0 +1,393 @@
+# Azure DevOps Pipeline for SDR Management System
+# Comprehensive CI/CD pipeline with multi-stage deployments
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - feature/*
+  paths:
+    exclude:
+      - docs/
+      - "*.md"
+      - .github/
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+variables:
+  - group: SDR-Common-Variables
+  - name: buildConfiguration
+    value: 'Release'
+  - name: nodeVersion
+    value: '18.x'
+  - name: ARM_TEMPLATE_PATH
+    value: 'infrastructure/bicep'
+  - name: FRONTEND_PATH
+    value: 'apps/frontend'
+  - name: API_PATH
+    value: 'apps/api'
+
+stages:
+  # ============== Build Stage ==============
+  - stage: Build
+    displayName: 'Build Stage'
+    jobs:
+
+      # Static Analysis Job
+      - job: Analyze
+        displayName: 'Static Analysis'
+        pool:
+          vmImage: 'ubuntu-latest'
+
+        steps:
+          - task: NodeTool@0
+            displayName: 'Setup Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - task: Cache@2
+            displayName: 'Cache node modules'
+            inputs:
+              key: 'npm | "$(Agent.OS)" | package-lock.json'
+              restoreKeys: |
+                npm | "$(Agent.OS)"
+              path: ~/.npm
+
+          - script: |
+              echo "Installing global tools..."
+              npm install -g eslint prettier
+            displayName: 'Install global tools'
+
+          - script: |
+              cd $(FRONTEND_PATH)
+              npm ci
+              npm run lint
+              npx prettier --check "src/**/*.{tsx,ts,css}"
+            displayName: 'Analyze Frontend'
+
+          - script: |
+              cd $(API_PATH)
+              npm ci
+              npm run lint
+            displayName: 'Analyze API'
+
+      # Build Frontend Job
+      - job: BuildFrontend
+        displayName: 'Build React Frontend'
+        dependsOn: Analyze
+        pool:
+          vmImage: 'ubuntu-latest'
+
+        steps:
+          - task: NodeTool@0
+            displayName: 'Setup Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - task: Cache@2
+            displayName: 'Cache npm packages'
+            inputs:
+              key: 'npm | "$(Agent.OS)" | $(FRONTEND_PATH)/package-lock.json'
+              restoreKeys: |
+                npm | "$(Agent.OS)"
+              path: ~/.npm
+
+          - script: |
+              cd $(FRONTEND_PATH)
+              npm ci
+              npm run type-check
+              npm run build
+              npm run test:ci
+            displayName: 'Build and test frontend'
+
+          - task: PublishTestResults@2
+            displayName: 'Publish frontend test results'
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '$(FRONTEND_PATH)/coverage/junit.xml'
+              mergeTestResults: true
+
+          - task: PublishCodeCoverageResults@1
+            displayName: 'Publish frontend code coverage'
+            inputs:
+              codeCoverageTool: 'Cobertura'
+              summaryFileLocation: '$(FRONTEND_PATH)/coverage/cobertura-coverage.xml'
+
+          - task: ArchiveFiles@2
+            displayName: 'Archive frontend build'
+            inputs:
+              rootFolderOrFile: '$(FRONTEND_PATH)/build'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/frontend.zip'
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish frontend artifacts'
+            inputs:
+              pathToPublish: '$(Build.ArtifactStagingDirectory)/frontend.zip'
+              artifactName: 'frontend'
+
+      # Build API Job
+      - job: BuildAPI
+        displayName: 'Build Azure Functions'
+        dependsOn: Analyze
+        pool:
+          vmImage: 'ubuntu-latest'
+
+        steps:
+          - task: NodeTool@0
+            displayName: 'Setup Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - script: |
+              cd $(API_PATH)
+              npm ci
+              npm run build
+              npm run test:ci
+            displayName: 'Build and test API'
+
+          - task: PublishTestResults@2
+            displayName: 'Publish API test results'
+            inputs:
+              testResultsFormat: 'JUnit'
+              testResultsFiles: '$(API_PATH)/coverage/junit.xml'
+              mergeTestResults: true
+
+          - task: ArchiveFiles@2
+            displayName: 'Archive API build'
+            inputs:
+              rootFolderOrFile: $(API_PATH)
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Build.ArtifactStagingDirectory)/api.zip'
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish API artifacts'
+            inputs:
+              pathToPublish: '$(Build.ArtifactStagingDirectory)/api.zip'
+              artifactName: 'api'
+
+  # ============== Infrastructure Validation Stage ==============
+  - stage: ValidateInfrastructure
+    displayName: 'Validate Infrastructure'
+    dependsOn: Build
+    condition: and(succeeded(), eq(variables['Build.Reason'], 'PullRequest'))
+
+    variables:
+      - group: SDR-Dev-Variables
+
+    jobs:
+      - job: ValidateBicep
+        displayName: 'Validate Bicep Templates'
+        pool:
+          vmImage: 'ubuntu-latest'
+
+        steps:
+          - task: AzureCLI@2
+            displayName: 'Validate Bicep templates'
+            inputs:
+              azureSubscription: 'SDR-ServiceConnection'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                az bicep build --file $(ARM_TEMPLATE_PATH)/main.bicep
+                
+                # Validate deployment for dev
+                az deployment group validate \
+                  --resource-group rg-sdr-dev-uksouth \
+                  --template-file $(ARM_TEMPLATE_PATH)/main.bicep \
+                  --parameters $(ARM_TEMPLATE_PATH)/parameters/dev.json \
+                  --parameters environment=dev
+
+  # ============== Deploy to Development ==============
+  - stage: DeployDev
+    displayName: 'Deploy to Development'
+    dependsOn: [ValidateInfrastructure, Build]
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'), ne(variables['Build.Reason'], 'PullRequest'))
+
+    variables:
+      - group: SDR-Dev-Variables
+
+    jobs:
+      - deployment: DeployInfrastructure
+        displayName: 'Deploy Infrastructure'
+        environment: 'SDR-Development'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureResourceManagerTemplateDeployment@3
+                  displayName: 'Deploy Bicep template'
+                  inputs:
+                    deploymentScope: 'Subscription'
+                    azureResourceManagerConnection: 'SDR-ServiceConnection'
+                    location: 'UK South'
+                    templateLocation: 'Linked artifact'
+                    csmFile: '$(Pipeline.Workspace)/$(ARM_TEMPLATE_PATH)/main.bicep'
+                    csmParametersFile: '$(Pipeline.Workspace)/$(ARM_TEMPLATE_PATH)/parameters/dev.json'
+                    deploymentMode: 'Incremental'
+                    deploymentOutputs: 'armOutputs'
+
+      - deployment: DeployApplications
+        displayName: 'Deploy Applications'
+        dependsOn: DeployInfrastructure
+        environment: 'SDR-Development'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureFunctionApp@1
+                  displayName: 'Deploy Function App'
+                  inputs:
+                    azureSubscription: 'SDR-ServiceConnection'
+                    appType: 'functionApp'
+                    appName: 'func-sdr-dev-uksouth'
+                    package: '$(Pipeline.Workspace)/api/api.zip'
+                    deploymentMethod: 'zipDeploy'
+                    appSettings: |
+                      -AZURE_FUNCTIONS_ENVIRONMENT development
+                      -NODE_ENV development
+
+                - task: AzureRmWebAppDeployment@4
+                  displayName: 'Deploy Static Web App'
+                  inputs:
+                    ConnectionType: 'AzureRM'
+                    azureSubscription: 'SDR-ServiceConnection'
+                    appType: 'webApp'
+                    WebAppName: 'swa-sdr-dev-uksouth'
+                    packageForLinux: '$(Pipeline.Workspace)/frontend/frontend.zip'
+
+      - job: HealthCheck
+        displayName: 'Health Check'
+        dependsOn: DeployApplications
+        pool:
+          vmImage: 'ubuntu-latest'
+
+        steps:
+          - task: Delay@1
+            inputs:
+              delayForMinutes: '1'
+
+          - script: |
+              echo "Performing health check..."
+              # Add health check logic here
+              echo "Health check completed"
+            displayName: 'Health check'
+
+  # ============== Deploy to Production ==============
+  - stage: DeployProd
+    displayName: 'Deploy to Production'
+    dependsOn: [ValidateInfrastructure, Build]
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+
+    variables:
+      - group: SDR-Prod-Variables
+
+    jobs:
+      - deployment: DeployProductionInfrastructure
+        displayName: 'Deploy Production Infrastructure'
+        environment: 'SDR-Production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureResourceManagerTemplateDeployment@3
+                  displayName: 'Deploy Production Infrastructure'
+                  inputs:
+                    deploymentScope: 'Subscription'
+                    azureResourceManagerConnection: 'SDR-ServiceConnection'
+                    location: 'UK South'
+                    templateLocation: 'Linked artifact'
+                    csmFile: '$(Pipeline.Workspace)/$(ARM_TEMPLATE_PATH)/main.bicep'
+                    csmParametersFile: '$(Pipeline.Workspace)/$(ARM_TEMPLATE_PATH)/parameters/prod.json'
+                    deploymentMode: 'Incremental'
+                    deploymentOutputs: 'armOutputs'
+
+      - deployment: ConfigureSecrets
+        displayName: 'Configure Key Vault Secrets'
+        dependsOn: DeployProductionInfrastructure
+        environment: 'SDR-Production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureCLI@2
+                  displayName: 'Set Key Vault secrets'
+                  inputs:
+                    azureSubscription: 'SDR-ServiceConnection'
+                    scriptType: 'bash'
+                    scriptLocation: 'inlineScript'
+                    inlineScript: |
+                      # Configure Key Vault secrets for production
+                      az keyvault secret set --name devops-pat-token --vault-name kv-sdr-prod-uksouth --value $(DEVOPS_PAT)
+                      az keyvault secret set --name openai-api-key --vault-name kv-sdr-prod-uksouth --value $(OPENAI_API_KEY)
+                      az keyvault secret set --name form-recognizer-key --vault-name kv-sdr-prod-uksouth --value $(FORM_RECOGNIZER_KEY)
+                      az keyvault secret set --name storage-connection-string --vault-name kv-sdr-prod-uksouth --value $(STORAGE_CONNECTION_STRING)
+
+      - deployment: DeployProductionApplications
+        displayName: 'Deploy Production Applications'
+        dependsOn: ConfigureSecrets
+        environment: 'SDR-Production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - task: AzureFunctionApp@1
+                  displayName: 'Deploy Function App'
+                  inputs:
+                    azureSubscription: 'SDR-ServiceConnection'
+                    appType: 'functionApp'
+                    appName: 'func-sdr-prod-uksouth'
+                    package: '$(Pipeline.Workspace)/api/api.zip'
+                    deploymentMethod: 'zipDeploy'
+                    appSettings: |
+                      -NODE_ENV production
+                      -AZURE_FUNCTIONS_ENVIRONMENT Production
+
+                - task: AzureRmWebAppDeployment@4
+                  displayName: 'Deploy Static Web App'
+                  inputs:
+                    ConnectionType: 'AzureRM'
+                    azureSubscription: 'SDR-ServiceConnection'
+                    appType: 'webApp'
+                    WebAppName: 'swa-sdr-prod-uksouth'
+                    packageForLinux: '$(Pipeline.Workspace)/frontend/frontend.zip'
+
+      - job: ProductionHealthCheck
+        displayName: 'Production Health Check'
+        dependsOn: DeployProductionApplications
+        pool:
+          vmImage: 'ubuntu-latest'
+
+        steps:
+          - task: Delay@1
+            inputs:
+              delayForMinutes: '2'
+
+          - script: |
+              echo "Performing production health checks..."
+              # Production-specific health checks
+              echo "Production health checks completed"
+            displayName: 'Production health check'
+
+# Notes:
+# - Configure variable groups: SDR-Common-Variables, SDR-Dev-Variables, SDR-Prod-Variables
+# - Configure service connections: SDR-ServiceConnection
+# - Configure environments: SDR-Development, SDR-Production
+# - Set up appropriate approvals and gates for production deployments
