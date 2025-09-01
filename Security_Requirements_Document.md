@@ -53,7 +53,7 @@ High Risk Threats:
 ├── Data Breaches
 │   ├── Unauthorized Access to DevOps
 │   ├── Storage Account Compromise
-│   ├── Key Vault Breach
+│   ├── Key Vault Breach (production only)
 │   └── AI Service Data Leakage
 └── Infrastructure Attacks
     ├── DDoS Attacks
@@ -90,7 +90,7 @@ Medium Risk Threats:
 | Customer SDR Data | Confidential | High | Encryption, Access Controls, Audit |
 | Internal SDR Data | Internal | Medium | Access Controls, Audit |
 | User Credentials | Restricted | Critical | MFA, Encryption, Rotation |
-| API Keys/Tokens | Restricted | Critical | Key Vault, Rotation, Monitoring |
+| API Keys/Tokens | Restricted | Critical | Key Vault (production only), Rotation, Monitoring |
 | System Logs | Internal | Medium | Retention, Access Controls |
 | Application Code | Internal | Low | Source Control, Code Review |
 
@@ -128,7 +128,7 @@ interface AttackSurface {
       staticWebApps: { publicAccess: true; riskLevel: 'Medium'; };
       functionApps: { publicAccess: true; riskLevel: 'High'; };
       storageAccounts: { publicAccess: false; riskLevel: 'Medium'; };
-      keyVault: { publicAccess: false; riskLevel: 'Critical'; };
+      keyVault: { publicAccess: false; riskLevel: 'Critical'; }; // production only
     };
   };
 }
@@ -205,8 +205,8 @@ graph TD
     G --> H[Data Access Layer]
     H --> I[Azure DevOps API]
     H --> J[Azure Storage]
-    H --> K[Azure Key Vault]
-    
+    H --> K[Azure Key Vault (production environment)]
+
     L[Network Security Groups] -.-> B
     L -.-> D
     
@@ -289,14 +289,14 @@ interface DataProtectionRequirements {
   encryption: {
     atRest: {
       algorithm: "AES-256";
-      keyManagement: "Azure Key Vault with HSM backing";
+      keyManagement: "Azure Key Vault with HSM backing (production only)";
       storageAccount: "Customer-managed keys";
       devOpsData: "Microsoft-managed encryption";
       rotationPolicy: "Annual key rotation";
     };
     inTransit: {
       protocol: "TLS 1.3 minimum";
-      certificateManagement: "Azure Key Vault certificates";
+      certificateManagement: "Azure Key Vault certificates (production only)";
       perfectForwardSecrecy: true;
       cipherSuites: ["TLS_AES_256_GCM_SHA384", "TLS_CHACHA20_POLY1305_SHA256"];
     };
@@ -390,7 +390,7 @@ interface NetworkSecurityRequirements {
   
   privateConnectivity: {
     privateEndpoints: {
-      keyVault: "Private endpoint for Key Vault access";
+      keyVault: "Private endpoint for Key Vault access (production only)";
       storageAccount: "Private endpoint for blob storage";
       devOpsServices: "If available in region";
     };
@@ -399,7 +399,7 @@ interface NetworkSecurityRequirements {
   };
   
   certificateManagement: {
-    certificates: "Azure Key Vault managed certificates";
+    certificates: "Azure Key Vault managed certificates (production only)";
     automation: "Automatic renewal 30 days before expiration";
     monitoring: "Certificate expiration alerting";
     validation: "Domain validation for public certificates";
@@ -642,7 +642,7 @@ export class SecurityMiddleware {
 interface DevOpsAPISecurityRequirements {
   authentication: {
     method: "Personal Access Token (PAT)";
-    storage: "Azure Key Vault with HSM backing";
+    storage: "Azure Key Vault with HSM backing (production only)";
     rotation: "Every 90 days";
     monitoring: "Usage tracking and anomaly detection";
   };
@@ -715,7 +715,7 @@ export class SecureDevOpsService {
   }
   
   private getEncodedPAT(): string {
-    // PAT is retrieved from Key Vault, not stored in memory
+    // PAT is retrieved from Key Vault (production environment), not stored in memory
     const pat = this.keyVaultService.getSecret('devops-pat-token');
     return Buffer.from(`:${pat}`).toString('base64');
   }
@@ -770,7 +770,7 @@ param enableAdvancedSecurity bool = true
 
 // Storage Account with security hardening
 resource storageAccount 'Microsoft.Storage/storageAccounts@2022-09-01' = {
-  name: 'stsdrprodeastus001'
+  name: 'stsdrproduksouth001'
   location: location
   sku: {
     name: environment == 'prod' ? 'Standard_ZRS' : 'Standard_LRS'
@@ -802,7 +802,7 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2022-09-01' = {
     // Encryption configuration
     encryption: {
       requireInfrastructureEncryption: true
-      keySource: 'Microsoft.Keyvault'
+      keySource: 'Microsoft.Keyvault' // production only
       keyvaultproperties: {
         keyname: 'storage-encryption-key'
         keyvaulturi: keyVault.properties.vaultUri
@@ -840,9 +840,9 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2022-09-01' = {
   }
 }
 
-// Key Vault with advanced security
+// Key Vault with advanced security (production environment)
 resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = {
-  name: 'kv-sdr-prod-eastus'
+  name: 'kv-sdr-prod-uksouth' // production environment
   location: location
   properties: {
     tenantId: subscription().tenantId
@@ -876,7 +876,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = {
 
 // Function App with security hardening
 resource functionApp 'Microsoft.Web/sites@2022-03-01' = {
-  name: 'func-sdr-prod-eastus'
+  name: 'func-sdr-prod-uksouth'
   location: location
   kind: 'functionapp'
   identity: {
@@ -917,15 +917,15 @@ resource functionApp 'Microsoft.Web/sites@2022-03-01' = {
         supportCredentials: false
       }
       
-      // App settings (secrets referenced from Key Vault)
+      // App settings (secrets referenced from Key Vault - production only)
       appSettings: [
         {
           name: 'AZURE_DEVOPS_PAT'
-          value: '@Microsoft.KeyVault(VaultName=${keyVault.name};SecretName=devops-pat-token)'
+          value: '@Microsoft.KeyVault(VaultName=${keyVault.name};SecretName=devops-pat-token)' // production only
         }
         {
           name: 'OPENAI_API_KEY'
-          value: '@Microsoft.KeyVault(VaultName=${keyVault.name};SecretName=openai-api-key)'
+          value: '@Microsoft.KeyVault(VaultName=${keyVault.name};SecretName=openai-api-key)' // production only
         }
         // ... other secure settings
       ]
@@ -942,7 +942,7 @@ resource functionApp 'Microsoft.Web/sites@2022-03-01' = {
     "enabledServices": [
       "Azure Defender for App Service",
       "Azure Defender for Storage",
-      "Azure Defender for Key Vault",
+      "Azure Defender for Key Vault (production only)",
       "Azure Defender for Resource Manager",
       "Azure Defender for DNS"
     ],
@@ -956,7 +956,7 @@ resource functionApp 'Microsoft.Web/sites@2022-03-01' = {
       "integrations": {
         "logAnalytics": {
           "enabled": true,
-          "workspaceId": "/subscriptions/.../Microsoft.OperationalInsights/workspaces/law-sdr-prod-eastus"
+          "workspaceId": "/subscriptions/.../Microsoft.OperationalInsights/workspaces/law-sdr-prod-uksouth"
         },
         "splunk": {
           "enabled": false,
@@ -971,7 +971,7 @@ resource functionApp 'Microsoft.Web/sites@2022-03-01' = {
         "scope": "ResourceGroup"
       },
       {
-        "name": "Key Vault should have soft delete enabled", 
+        "name": "Key Vault should have soft delete enabled (production only)",
         "effect": "AuditIfNotExists",
         "scope": "ResourceGroup"
       },

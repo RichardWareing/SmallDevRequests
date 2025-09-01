@@ -42,10 +42,14 @@ Development Tools:
 Required Azure Resources:Can you generate a Readme
   - Azure Subscription with DevOps Services
   - Resource Group: rg-sdr-dev, rg-sdr-test, rg-sdr-prod
-  - Key Vault for secrets management
+  - Key Vault for secrets management (production only - use environment variables/mock secrets in dev/test)
   - Application Insights for monitoring
   - Storage Account for static web apps and blobs
 ```
+
+**Secret Management Approach:**
+- **Development/Test Environments (rg-sdr-dev / rg-sdr-test):** Use environment variables or local config files (e.g., .env.development, .env.test) with mock secrets for faster iteration, easier collaboration, and reduced costs
+- **Production Environment (rg-sdr-prod):** Utilize Azure Key Vault for secure secrets management, centralized access policies, compliance, and production best practices
 
 ---
 
@@ -61,15 +65,20 @@ Required Azure Resources:Can you generate a Readme
 1. **Azure Resource Groups Creation**
    ```bash
    # Create resource groups
-   az group create --name rg-sdr-dev --location eastus
-   az group create --name rg-sdr-test --location eastus
-   az group create --name rg-sdr-prod --location eastus
+   az group create --name rg-sdr-dev --location uksouth
+   az group create --name rg-sdr-test --location uksouth
+   az group create --name rg-sdr-prod --location uksouth
    ```
 
-2. **Key Vault Setup**
+2. **Secret Management Setup**
    ```bash
-   # Create Key Vault for secrets
-   az keyvault create --name kv-sdr-dev --resource-group rg-sdr-dev
+   # Production: Create Key Vault for secrets
+   az keyvault create --name kv-sdr-prod --resource-group rg-sdr-prod
+   
+   # Dev/Test: Use environment variables or config files
+   # Set up .env.development and .env.test files with mock secrets
+   cp .env.example .env.development
+   # Populate with development mocks, e.g., DEV_PAT_TOKEN=mock_token_123
    ```
 
 3. **Storage Account for Static Web Apps**
@@ -81,13 +90,13 @@ Required Azure Resources:Can you generate a Readme
 4. **Application Insights Setup**
    ```bash
    # Create Application Insights
-   az monitor app-insights component create --app sdr-insights --location eastus --resource-group rg-sdr-dev
+   az monitor app-insights component create --app sdr-insights --location uksouth --resource-group rg-sdr-dev
    ```
 
 **Deliverables:**
 - ✅ Development, Test, Production Azure environments
 - ✅ ARM templates for infrastructure as code
-- ✅ Key Vault with access policies configured
+- ✅ Key Vault with access policies configured (production only; dev/test use environment variables)
 - ✅ Application Insights for monitoring setup
 
 #### 2.1.2 DevOps Projects and Work Item Configuration
@@ -122,7 +131,7 @@ Required Azure Resources:Can you generate a Readme
 **Deliverables:**
 - ✅ Three DevOps projects created and configured
 - ✅ "SDR Request" custom work item type implemented
-- ✅ PAT token created and stored in Key Vault
+- ✅ PAT token created and configured via environment variables in dev/test, stored in Key Vault in production
 - ✅ DevOps REST API connection tested
 
 ### 2.2 Week 3: Authentication & Authorization Framework
@@ -1220,7 +1229,7 @@ Required Azure Resources:Can you generate a Readme
 1. **UAT Environment Provisioning**
    ```bash
    # Create UAT environment
-   az group create --name rg-sdr-uat --location eastus
+   az group create --name rg-sdr-uat --location uksouth
    az deployment group create \
      --resource-group rg-sdr-uat \
      --template-file infrastructure/main.bicep \
@@ -1298,7 +1307,7 @@ Required Azure Resources:Can you generate a Readme
    ```bicep
    // infrastructure/production.bicep
    param environment string = 'prod'
-   param location string = 'eastus'
+   param location string = 'uksouth'
    
    resource resourceGroup 'Microsoft.Resources/resourceGroups@2021-04-01' = {
      name: 'rg-sdr-${environment}'
@@ -1320,7 +1329,7 @@ Required Azure Resources:Can you generate a Readme
    // scripts/security-hardening.ts
    async function hardenProduction() {
      await enableApplicationGatewayWAF();
-     await configureKeyVaultAccessPolicies();
+     await configureKeyVaultAccessPolicies(); // Production only - Key Vault not used in dev/test
      await setupApplicationInsightsSecurity();
      await enableAzureDefender();
      await configureNetworkSecurityGroups();

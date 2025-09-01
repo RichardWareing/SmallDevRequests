@@ -154,7 +154,7 @@ To provide a lightweight, centralized platform for managing small development re
 ### 5.4 Primary Backend Storage
 - **Azure DevOps Projects** - Primary data storage using work items
 - **Azure Blob Storage** - File attachments and documents (linked to DevOps work items)
-- **Azure Key Vault** - PAT tokens and configuration management
+- **Azure Key Vault** - PAT tokens and configuration management (production only)
 
 ### 5.5 Integration and Communication
 - **Azure DevOps REST API** - Primary backend interface using PAT tokens
@@ -164,8 +164,8 @@ To provide a lightweight, centralized platform for managing small development re
 
 ### 5.6 Security and Identity
 - **Azure Active Directory** - Frontend user authentication
-- **DevOps PAT Tokens** - Backend API authentication (stored in Key Vault)
-- **Azure Key Vault** - Secrets and PAT token management
+- **DevOps PAT Tokens** - Backend API authentication (stored in Key Vault, production only)
+- **Azure Key Vault** - Secrets and PAT token management (production only)
 - **Azure Application Gateway** - Web application firewall
 
 ### 5.7 Microsoft Teams Integration Architecture
@@ -196,7 +196,7 @@ DevOps Projects {
 }
 
 PAT Token Configuration {
-  Token: Stored in Azure Key Vault
+  Token: Stored in Azure Key Vault (production only)
   Permissions: Work Items (Read/Write), Project and Teams (Read)
   Scope: Specific to SDR projects
 }
@@ -533,7 +533,7 @@ GROUP BY [System.AssignedTo]
 | Identity (Frontend) | Azure Active Directory | User authentication |
 | Identity (Backend) | DevOps PAT Tokens | API authentication |
 | Monitoring | Application Insights + DevOps Analytics | Observability and reporting |
-| Security | Azure Key Vault | PAT tokens and secrets management |
+| Security | Azure Key Vault (production only) | PAT tokens and secrets management |
 
 ---
 
@@ -569,7 +569,7 @@ GROUP BY [System.AssignedTo]
 ### Phase 1: Foundation (Weeks 1-4)
 - Azure environment setup
 - DevOps projects creation and custom work item types
-- PAT token configuration and Key Vault setup
+- PAT token configuration and Key Vault setup (production only)
 - Core authentication and authorization
 - Basic web application framework
 

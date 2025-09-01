@@ -1009,7 +1009,7 @@ export let options = {
   },
 };
 
-const BASE_URL = 'https://func-sdr-prod-eastus.azurewebsites.net';
+const BASE_URL = 'https://func-sdr-prod-uksouth.azurewebsites.net';
 const AUTH_TOKEN = __ENV.AUTH_TOKEN || 'test-token';
 
 export function setup() {

@@ -769,7 +769,7 @@ sequenceDiagram
     participant AzureAD
     participant AppGateway
     participant Functions
-    participant KeyVault
+    participant KeyVault (Prod-only)
     participant DevOps
 
     User->>WebApp: Access Application
@@ -777,8 +777,8 @@ sequenceDiagram
     AzureAD->>WebApp: Return ID Token + Access Token
     WebApp->>AppGateway: API Request with Bearer Token
     AppGateway->>Functions: Forward Request (Token Validated)
-    Functions->>KeyVault: Retrieve PAT Token
-    KeyVault-->>Functions: PAT Token
+    Functions->>KeyVault (Prod-only): Retrieve PAT Token
+    KeyVault (Prod-only)-->>Functions: PAT Token
     Functions->>DevOps: API Call with PAT
     DevOps-->>Functions: Response
     Functions-->>WebApp: API Response
@@ -813,7 +813,7 @@ interface NetworkSecurityConfig {
   };
 
   privateEndpoints: {
-    keyVault: boolean;
+    keyVault: boolean; // Production environment only
     storage: boolean;
     devOps: boolean; // If available in region
   };

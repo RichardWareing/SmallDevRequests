@@ -117,7 +117,7 @@ graph TB
     
     I[Azure AD] --> A
     I --> C
-    J[Key Vault] --> E
+    J[Key Vault<br/>(Production only)] --> E
     K[Application Insights] --> E
 ```
 
@@ -163,7 +163,7 @@ graph TB
    az login
    
    # Create resource group
-   az group create --name rg-sdr-dev --location eastus
+   az group create --name rg-sdr-dev --location uksouth
    
    # Deploy infrastructure
    az deployment group create \
@@ -609,7 +609,7 @@ npm run health:performance
 
 - **Zero Trust Architecture**: Never trust, always verify
 - **Azure AD Integration**: Enterprise identity and access management
-- **Data Encryption**: At rest and in transit using Azure Key Vault
+- **Data Encryption**: At rest and in transit using Azure Key Vault (production environments only)
 - **Network Security**: Application Gateway with WAF protection
 - **Audit Logging**: Comprehensive activity tracking
 - **Compliance**: GDPR, SOC 2, industry standards

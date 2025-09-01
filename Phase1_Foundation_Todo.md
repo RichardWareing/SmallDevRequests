@@ -4,7 +4,9 @@
 Establish core infrastructure and DevOps integration to create a stable foundation for the SDR Management System.
 
 ## Deliverables
-- [ ] Azure environments provisioned with resource groups, Key Vault, Storage Account, and Application Insights
+- [ ] Azure environments provisioned:
+  - Resource groups, Storage Account, and Application Insights (all environments: dev, staging, prod)
+  - Key Vault (production only)
 - [ ] DevOps projects configured with custom "SDR Request" work item types and PAT token authentication
 - [ ] Azure AD authentication framework with role-based access control
 - [ ] Azure Functions backend with DevOps API integration

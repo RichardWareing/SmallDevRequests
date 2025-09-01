@@ -24,15 +24,15 @@ const namingConventions = {
   pattern: "{resourceType}-{app}-{env}-{region}-{instance?}",
   
   examples: {
-    resourceGroup: "rg-sdr-prod-eastus",
-    storageAccount: "stsdrprodeastus001",  // Storage accounts: no hyphens, max 24 chars
-    functionApp: "func-sdr-prod-eastus",
-    staticWebApp: "swa-sdr-prod-eastus",
-    keyVault: "kv-sdr-prod-eastus",
-    applicationInsights: "ai-sdr-prod-eastus",
-    botService: "bot-sdr-prod-eastus",
-    applicationGateway: "agw-sdr-prod-eastus",
-    logAnalytics: "law-sdr-prod-eastus"
+    resourceGroup: "rg-sdr-prod-uksouth",
+    storageAccount: "stsdrproduksouth001",  // Storage accounts: no hyphens, max 24 chars
+    functionApp: "func-sdr-prod-uksouth",
+    staticWebApp: "swa-sdr-prod-uksouth",
+    keyVault: "kv-sdr-prod-uksouth",  // Production only
+    applicationInsights: "ai-sdr-prod-uksouth",
+    botService: "bot-sdr-prod-uksouth",
+    applicationGateway: "agw-sdr-prod-uksouth",
+    logAnalytics: "law-sdr-prod-uksouth"
   }
 };
 
@@ -47,8 +47,8 @@ const environmentCodes = {
 
 // Region Codes
 const regionCodes = {
-  "East US": "eastus",
-  "East US 2": "eastus2",
+  "UK South": "uksouth",
+  "UK South 2": "uksouth2",
   "West US 2": "westus2",
   "West Europe": "westeu",
   "North Europe": "northeu"
@@ -59,17 +59,17 @@ const regionCodes = {
 
 | Resource Type | Prefix | Example | Notes |
 |---------------|--------|---------|-------|
-| Resource Group | `rg-` | `rg-sdr-prod-eastus` | Container for all resources |
-| Function App | `func-` | `func-sdr-prod-eastus` | Serverless compute |
-| Static Web App | `swa-` | `swa-sdr-prod-eastus` | Frontend hosting |
-| Storage Account | `st` | `stsdrprodeastus001` | No hyphens, lowercase, max 24 chars |
-| Key Vault | `kv-` | `kv-sdr-prod-eastus` | Secrets management |
-| Application Insights | `ai-` | `ai-sdr-prod-eastus` | Monitoring and telemetry |
-| Log Analytics Workspace | `law-` | `law-sdr-prod-eastus` | Centralized logging |
-| Application Gateway | `agw-` | `agw-sdr-prod-eastus` | Load balancer and WAF |
-| Bot Service | `bot-` | `bot-sdr-prod-eastus` | Teams Bot hosting |
-| Event Grid Topic | `egt-` | `egt-sdr-prod-eastus` | Event routing |
-| Logic App | `la-` | `la-sdr-email-prod-eastus` | Workflow automation |
+| Resource Group | `rg-` | `rg-sdr-prod-uksouth` | Container for all resources |
+| Function App | `func-` | `func-sdr-prod-uksouth` | Serverless compute |
+| Static Web App | `swa-` | `swa-sdr-prod-uksouth` | Frontend hosting |
+| Storage Account | `st` | `stsdrproduksouth001` | No hyphens, lowercase, max 24 chars |
+| Key Vault | `kv-` | `kv-sdr-prod-uksouth` | Secrets management (production only) |
+| Application Insights | `ai-` | `ai-sdr-prod-uksouth` | Monitoring and telemetry |
+| Log Analytics Workspace | `law-` | `law-sdr-prod-uksouth` | Centralized logging |
+| Application Gateway | `agw-` | `agw-sdr-prod-uksouth` | Load balancer and WAF |
+| Bot Service | `bot-` | `bot-sdr-prod-uksouth` | Teams Bot hosting |
+| Event Grid Topic | `egt-` | `egt-sdr-prod-uksouth` | Event routing |
+| Logic App | `la-` | `la-sdr-email-prod-uksouth` | Workflow automation |
 
 ### 2.3 Tagging Standards
 
@@ -171,7 +171,7 @@ module applicationServices 'modules/application-services.bicep' = {
     location: location
     resourceSuffix: resourceSuffix
     storageAccountName: coreInfrastructure.outputs.storageAccountName
-    keyVaultName: coreInfrastructure.outputs.keyVaultName
+    keyVaultName: coreInfrastructure.outputs.keyVaultName  // Note: Only available in production
   }
 }
 
@@ -240,8 +240,8 @@ resource storageAccount 'Microsoft.Storage/storageAccounts@2022-09-01' = {
   }
 }
 
-// Key Vault
-resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = {
+// Key Vault (Production only)
+resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = if (environment == 'prod') {
   name: 'kv-${resourceSuffix}'
   location: location
   properties: {
@@ -261,7 +261,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2022-07-01' = {
       bypass: 'AzureServices'
     }
   }
-  
+
   tags: {
     Application: 'SDR-Management-System'
     Environment: environment
@@ -314,8 +314,8 @@ resource applicationInsights 'Microsoft.Insights/components@2020-02-02' = if (en
 // Outputs
 output storageAccountName string = storageAccount.name
 output storageAccountId string = storageAccount.id
-output keyVaultName string = keyVault.name
-output keyVaultId string = keyVault.id
+output keyVaultName string = environment == 'prod' ? keyVault.name : ''  // Production only
+output keyVaultId string = environment == 'prod' ? keyVault.id : ''  // Production only
 output applicationInsightsName string = enableMonitoring ? applicationInsights.name : ''
 output applicationInsightsKey string = enableMonitoring ? applicationInsights.properties.InstrumentationKey : ''
 output logAnalyticsWorkspaceId string = enableMonitoring ? logAnalyticsWorkspace.id : ''
@@ -337,7 +337,7 @@ param resourceSuffix string
 @description('Storage account name')
 param storageAccountName string
 
-@description('Key Vault name')
+@description('Key Vault name')  // Production only
 param keyVaultName string
 
 // App Service Plan for Function App
@@ -452,8 +452,8 @@ resource staticWebApp 'Microsoft.Web/staticSites@2022-03-01' = {
   }
 }
 
-// Grant Function App access to Key Vault
-resource keyVaultAccessPolicy 'Microsoft.KeyVault/vaults/accessPolicies@2022-07-01' = {
+// Grant Function App access to Key Vault (production only)
+resource keyVaultAccessPolicy 'Microsoft.KeyVault/vaults/accessPolicies@2022-07-01' = if (environment == 'prod') {
   name: '${keyVaultName}/add'
   properties: {
     accessPolicies: [
@@ -621,7 +621,7 @@ stages:
               inlineScript: |
                 az bicep build --file infrastructure/main.bicep
                 az deployment group validate \
-                  --resource-group rg-sdr-dev-eastus \
+                  --resource-group rg-sdr-dev-uksouth \
                   --template-file infrastructure/main.bicep \
                   --parameters environment=dev
           
@@ -652,8 +652,8 @@ stages:
                   inputs:
                     deploymentScope: 'Resource Group'
                     azureResourceManagerConnection: 'SDR-ServiceConnection'
-                    resourceGroupName: 'rg-sdr-dev-eastus'
-                    location: 'East US'
+                    resourceGroupName: 'rg-sdr-dev-uksouth'
+                    location: 'UK South'
                     templateLocation: 'Linked artifact'
                     csmFile: '$(Pipeline.Workspace)/infrastructure/main.bicep'
                     csmParametersFile: '$(Pipeline.Workspace)/infrastructure/parameters/dev.json'
@@ -710,8 +710,8 @@ stages:
                   inputs:
                     deploymentScope: 'Resource Group'
                     azureResourceManagerConnection: 'SDR-ServiceConnection'
-                    resourceGroupName: 'rg-sdr-prod-eastus'
-                    location: 'East US'
+                    resourceGroupName: 'rg-sdr-prod-uksouth'
+                    location: 'UK South'
                     templateLocation: 'Linked artifact'
                     csmFile: '$(Pipeline.Workspace)/infrastructure/main.bicep'
                     csmParametersFile: '$(Pipeline.Workspace)/infrastructure/parameters/prod.json'
@@ -803,7 +803,7 @@ jobs:
       - name: Deploy Azure Functions
         uses: Azure/functions-action@v1
         with:
-          app-name: 'func-sdr-dev-eastus'
+          app-name: 'func-sdr-dev-uksouth'
           package: 'function-build'
           publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE_DEV }}
 
@@ -835,7 +835,7 @@ jobs:
       "value": "dev"
     },
     "location": {
-      "value": "eastus"
+      "value": "uksouth"
     },
     "appVersion": {
       "value": "1.0.0"
@@ -869,7 +869,7 @@ jobs:
       "value": "prod"
     },
     "location": {
-      "value": "eastus"
+      "value": "uksouth"
     },
     "appVersion": {
       "value": "1.0.0"
@@ -912,16 +912,16 @@ export interface EnvironmentConfig {
       critical: string;
       external: string;
     };
-    patTokenKeyVaultSecret: string;
+    patTokenKeyVaultSecret: string;  // Production only
   };
   ai: {
     openAiEndpoint: string;
-    openAiKeyVaultSecret: string;
+    openAiKeyVaultSecret: string;  // Production only
     formRecognizerEndpoint: string;
-    formRecognizerKeyVaultSecret: string;
+    formRecognizerKeyVaultSecret: string;  // Production only
   };
   storage: {
-    connectionStringKeyVaultSecret: string;
+    connectionStringKeyVaultSecret: string;  // Production only
     containerNames: {
       attachments: string;
       processing: string;
@@ -930,7 +930,7 @@ export interface EnvironmentConfig {
   };
   teams: {
     botAppId: string;
-    botAppPasswordKeyVaultSecret: string;
+    botAppPasswordKeyVaultSecret: string;  // Production only
     tenantId: string;
   };
   monitoring: {
@@ -999,6 +999,29 @@ export class ConfigurationService {
       },
       features: this.getFeatureFlags(environment)
     };
+
+        // Production only - for non-production environments, use local secrets from environment variables or local files
+        patTokenKeyVaultSecret: 'devops-pat-token'  // Alternative: process.env.DEVOPS_PAT_TOKEN
+      },
+      ai: {
+        openAiEndpoint: process.env.OPENAI_ENDPOINT!,
+        openAiKeyVaultSecret: 'openai-api-key',  // Alternative: process.env.OPENAI_API_KEY
+        formRecognizerEndpoint: process.env.FORM_RECOGNIZER_ENDPOINT!,
+        formRecognizerKeyVaultSecret: 'form-recognizer-key'  // Alternative: process.env.FORM_RECOGNIZER_KEY
+      },
+      storage: {
+        connectionStringKeyVaultSecret: 'storage-connection-string',  // Alternative: process.env.AZURE_STORAGE_CONNECTION_STRING
+        containerNames: {
+          attachments: 'sdr-attachments',
+          processing: 'ai-processing',
+          exports: 'exports'
+        }
+      },
+      teams: {
+        botAppId: process.env.BOT_APP_ID!,
+        botAppPasswordKeyVaultSecret: 'bot-app-password',  // Alternative: process.env.BOT_APP_PASSWORD
+        tenantId: process.env.TENANT_ID!
+      },
 
     return baseConfig;
   }
@@ -1251,15 +1274,15 @@ export interface BackupStrategy {
     method: 'export-to-blob';
     automation: 'azure-logic-app';
   };
-  
+
   storageAccount: {
     frequency: 'continuous';
     retention: '7 days point-in-time, 30 days snapshots';
     method: 'geo-redundant-storage';
     crossRegionReplication: true;
   };
-  
-  keyVault: {
+
+  keyVault: {  // Production only
     frequency: 'continuous';
     retention: '90 days';
     method: 'azure-backup';
@@ -1319,7 +1342,7 @@ export class DisasterRecoveryService {
 | Function Apps | 30 minutes | 0 (code in git) | Redeploy from source |
 | DevOps Work Items | 4 hours | 24 hours | Restore from daily export |
 | File Storage | 1 hour | 15 minutes | GRS failover |
-| Key Vault | 2 hours | 0 (continuous backup) | Cross-region replication |
+| Key Vault (production only) | 2 hours | 0 (continuous backup) | Cross-region replication |
 | Configuration | 15 minutes | 0 (IaC templates) | Redeploy infrastructure |
 
 ---
@@ -1365,11 +1388,92 @@ security_hardening:
 
 ### 8.2 Access Control Matrix
 
-| Role | Resource Group | Key Vault | Storage Account | Function App | DevOps Projects |
-|------|---------------|-----------|-----------------|--------------|----------------|
+| Role | Resource Group | Key Vault (production only) | Storage Account | Function App | DevOps Projects |
+|------|---------------|----------------------------|-----------------|--------------|----------------|
 | Developer | Contributor | Secret User | Blob Data Contributor | Contributor | Contributor |
 | DevOps Engineer | Owner | Owner | Storage Account Contributor | Owner | Project Administrator |
 | Security Team | Reader | Reader | Reader | Reader | Reader |
 | End Users | None | None | None | None | Basic Access |
 
-This comprehensive Infrastructure & DevOps Standards document provides the foundation for consistent, secure, and maintainable operations of the SDR Management System across all environments.
+---
+
+## 9. Environment-Specific Configurations
+
+### 9.1 Non-Production Secret Management
+
+For development, testing, and staging environments, where Azure Key Vault is not deployed, implement alternative approaches for secret management:
+
+**Local Configuration Files:**
+- Use `.env` files for development environments (add to `.gitignore`)
+- Example: `.env.development` containing `OPENAI_API_KEY=sk-...`
+- Load using `dotenv` package: `require('dotenv').config({ path: `.env.${process.env.NODE_ENV}` });`
+
+**Environment Variables:**
+- Set secrets as environment variables in local development
+- Use Azure Functions local.settings.json for development secrets
+- Inject via deployment scripts or CI/CD variable groups
+
+**Mock Values:**
+- Use test/mock API keys for non-production environments
+- Azure offers free tiers for development use (e.g., OpenAI trials)
+- Implement fallback mechanisms in code to handle missing secrets
+
+**Access Layer Pattern:**
+```typescript
+// Example access layer with environment fallbacks
+class SecretService {
+  static getSecret(name: string): string {
+    // Check if Key Vault is available (production)
+    if (process.env.KEYVAULT_NAME) {
+      return await keyVault.secretGet(name);
+    }
+
+    // Fallback to environment variables (non-production)
+    const envVar = process.env[name.toUpperCase()];
+    if (envVar) return envVar;
+
+    // Final fallback to mock values for CI/testing
+    return this.getMockValue(name);
+  }
+
+  private static getMockValue(name: string): string {
+    const mocks = {
+      'OPENAI_API_KEY': 'mock-openai-key',
+      'FORM_RECOGNIZER_KEY': 'mock-fr-key',
+      'STORAGE_CONNECTION_STRING': 'UseDevelopmentStorage=true'
+    };
+    return mocks[name] || `mock-${name}`;
+  }
+}
+```
+
+### 9.2 Conditional Deployment Guidelines
+
+**Infrastructure Templates:**
+- Use Bicep/Azure Resource Manager conditions to deploy resources only in production
+- Example: `if (environment == 'prod') { resource keyVault ... }`
+- Maintain consistent parameter schemas across environments, even if empty
+
+**Deployment Pipelines:**
+- Implement conditional steps in Azure DevOps/GitHub Actions
+- Example: Run Key Vault-related tasks only when environment is production
+- Separate parameter files for each environment
+
+**Configuration Code:**
+- Check for Key Vault availability before attempting to retrieve secrets
+- Gracefully degrade in non-production environments
+- Use environment-feature flags to enable/disable Key Vault-dependent features
+
+**Testing Strategies:**
+- Mock Key Vault in unit and integration tests
+- Use shared test secrets in CI/CD pipelines
+- Validate conditional logic deployment in staging environments
+
+**Cost Optimization:**
+- Avoid deploying Key Vault in development environments to reduce costs
+- Use free-tier alternatives or emulator services for local development
+- Implement resource cleanup policies for non-production deployments
+
+---
+
+This comprehensive Infrastructure & DevOps Standards document provides the foundation for consistent, secure, and maintainable operations of the SDR Management System across all environments. Key Vault is deployed only in production to optimize costs and maintain environment symmetry while ensuring robust secret management where critical.
